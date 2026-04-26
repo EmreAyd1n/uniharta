@@ -1,0 +1,6 @@
+Analyzing uni_harita_mobile...                                  
+
+warning - The value of the local variable 'password' isn't used - lib\login_page.dart:16:11 - unused_local_variable
+   info - Don't invoke 'print' in production code - lib\login_page.dart:17:5 - avoid_print
+   info - Don't invoke 'print' in production code - lib\main.dart:13:3 - avoid_print
+
