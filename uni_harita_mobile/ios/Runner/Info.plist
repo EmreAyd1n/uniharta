@@ -45,5 +45,7 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>UniHarita, kampüs haritasını gösterebilmek için konumunuza erişmek istiyor.</string>
 </dict>
 </plist>

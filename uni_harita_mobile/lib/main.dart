@@ -1,14 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'login_page.dart';
-import 'home_page.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+
+import 'widgets/auth_wrapper.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // .env dosyasını yükle
+  await dotenv.load(fileName: ".env");
+
+  // Supabase'i .env üzerinden başlat — hardcoded anahtar yok
   await Supabase.initialize(
-    url: 'https://zfuwnsxaxjbufmqshrkm.supabase.co',
-    anonKey: 'sb_publishable_c5pWbhwK6Y1jXTXZ33xiWA_Ia5lluOp',
+    url: dotenv.get('SUPABASE_URL'),
+    anonKey: dotenv.get('SUPABASE_ANON_KEY'),
   );
 
   runApp(const MyApp());
@@ -19,9 +24,6 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Mevcut oturumu kontrol et
-    final session = Supabase.instance.client.auth.currentSession;
-
     return MaterialApp(
       title: 'UniHarita Mobile',
       debugShowCheckedModeBanner: false,
@@ -33,7 +35,7 @@ class MyApp extends StatelessWidget {
         useMaterial3: true,
         fontFamily: 'Roboto',
       ),
-      home: session != null ? const HomePage() : const LoginPage(),
+      home: const AuthWrapper(),
     );
   }
 }
