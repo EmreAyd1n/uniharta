@@ -9,6 +9,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/campus_location.dart';
 import '../services/mapbox_route_service.dart';
+import '../services/location_service.dart';
+import 'package:geolocator/geolocator.dart' as geo;
+import 'dart:async';
 
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
@@ -29,6 +32,15 @@ class _MapScreenState extends State<MapScreen> {
   num? _routeDistance;
   num? _routeDuration;
 
+  geo.Position? _currentPosition;
+  StreamSubscription<geo.Position>? _positionStreamSubscription;
+
+  @override
+  void dispose() {
+    _positionStreamSubscription?.cancel();
+    super.dispose();
+  }
+
   @override
   void initState() {
     super.initState();
@@ -41,6 +53,60 @@ class _MapScreenState extends State<MapScreen> {
   void _onMapCreated(MapboxMap mapboxMap) async {
     _mapboxMap = mapboxMap;
     await _addMarkers();
+
+    // Konum iznini kontrol et
+    final hasPermission = await LocationService.checkAndRequestPermissions(context);
+    if (hasPermission) {
+      _enableLocationTracking();
+    }
+  }
+
+  void _enableLocationTracking() async {
+    if (_mapboxMap == null) return;
+    
+    try {
+      await _mapboxMap!.location.updateSettings(LocationComponentSettings(
+        enabled: true,
+        pulsingEnabled: true,
+      ));
+      
+      // İlk konumu al
+      final position = await LocationService.getCurrentLocation();
+      if (position != null && mounted) {
+        setState(() {
+          _currentPosition = position;
+        });
+        // Kamerayı ilk açılışta konuma al
+        _focusOnUserLocation();
+      }
+
+      // Konum dinlemeye başla
+      _positionStreamSubscription = LocationService.getPositionStream().listen((geo.Position position) {
+        if (!mounted) return;
+        setState(() {
+          _currentPosition = position;
+        });
+
+        // Eğer aktif bir rota varsa, güncel konuma göre yeniden hesapla
+        if (_selectedDestination != null) {
+          _drawRoute(_selectedDestination!);
+        }
+      });
+    } catch (e) {
+      debugPrint('Location tracking error: $e');
+    }
+  }
+
+  void _focusOnUserLocation() {
+    if (_mapboxMap == null || _currentPosition == null) return;
+    
+    _mapboxMap!.flyTo(
+      CameraOptions(
+        center: Point(coordinates: Position(_currentPosition!.longitude, _currentPosition!.latitude)),
+        zoom: _zoom,
+      ),
+      MapAnimationOptions(duration: 1000),
+    );
   }
 
   /// Programatik olarak marker ikonu oluşturur (asset gerektirmez)
@@ -119,8 +185,10 @@ class _MapScreenState extends State<MapScreen> {
       _routeDuration = null;
     });
 
-    // Başlangıç (Teknoloji Fakültesi)
-    final start = Position(_longitude, _latitude);
+    // Başlangıç (Canlı konum varsa o, yoksa Teknoloji Fakültesi)
+    final start = _currentPosition != null
+        ? Position(_currentPosition!.longitude, _currentPosition!.latitude)
+        : Position(_longitude, _latitude);
     // Hedef
     final end = Position(destination.longitude, destination.latitude);
 
@@ -376,7 +444,7 @@ class _MapScreenState extends State<MapScreen> {
               center: Point(coordinates: Position(_longitude, _latitude)),
               zoom: _zoom,
             ),
-            styleUri: MapboxStyles.DARK,
+            styleUri: MapboxStyles.MAPBOX_STREETS,
           ),
 
           // Search Butonu - Sol üst
@@ -468,6 +536,19 @@ class _MapScreenState extends State<MapScreen> {
                   ),
                 ),
               ),
+            ),
+          ),
+
+          // GPS Butonu - Sağ alt
+          Positioned(
+            bottom: _selectedDestination == null ? 24 : 160,
+            right: 16,
+            child: FloatingActionButton(
+              heroTag: 'gps_btn',
+              onPressed: _focusOnUserLocation,
+              backgroundColor: const Color(0xCC1A1A2E),
+              elevation: 8,
+              child: const Icon(Icons.my_location, color: Colors.blueAccent),
             ),
           ),
 
