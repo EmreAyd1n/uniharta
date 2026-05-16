@@ -51,5 +51,7 @@
 	<string>UniHarita, kampüs haritasını sürekli gösterebilmek için konumunuza erişmek istiyor.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>UniHarita, kampüs haritasını sürekli gösterebilmek için konumunuza erişmek istiyor.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>UniHarita, binalardaki etkinlikleri AR görünümünde gösterebilmek için kameranıza erişmek istiyor.</string>
 </dict>
 </plist>
