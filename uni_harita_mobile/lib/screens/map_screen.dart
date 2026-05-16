@@ -41,6 +41,10 @@ class _MapScreenState extends State<MapScreen> {
   bool _isSearching = false;
   String? _searchResultText;
   EventModel? _selectedEvent;
+  
+  bool _isOrganizer = false;
+  StreamSubscription<List<EventModel>>? _eventsSubscription;
+  PointAnnotationManager? _eventAnnotationManager;
 
   final List<String> _filterCategories = [
     'Tümü', 'Seminer', 'Spor', 'Yemek', 'Eğlence'
@@ -48,6 +52,7 @@ class _MapScreenState extends State<MapScreen> {
 
   @override
   void dispose() {
+    _eventsSubscription?.cancel();
     _positionStreamSubscription?.cancel();
     _searchController.dispose();
     super.dispose();
@@ -58,16 +63,40 @@ class _MapScreenState extends State<MapScreen> {
     super.initState();
     final accessToken = dotenv.get('MAPBOX_ACCESS_TOKEN');
     MapboxOptions.setAccessToken(accessToken);
-    _loadEvents();
+    _checkUserRole();
+    _startEventsStream();
   }
 
-  Future<void> _loadEvents() async {
+  Future<void> _checkUserRole() async {
     try {
-      final events = await EventService.fetchActiveEvents();
-      if (mounted) setState(() => _events = events);
-    } catch (e) {
-      debugPrint('Events load error: $e');
+      final user = Supabase.instance.client.auth.currentUser;
+      if (user == null) return;
+      final data = await Supabase.instance.client.from('profiles').select('user_type').eq('id', user.id).single();
+      if (mounted) setState(() => _isOrganizer = data['user_type'] == 'organizator');
+    } catch (_) {
+      final user = Supabase.instance.client.auth.currentUser;
+      if (mounted && user != null) {
+        setState(() => _isOrganizer = user.userMetadata?['user_type'] == 'organizator');
+      }
     }
+  }
+
+  void _startEventsStream() {
+    _eventsSubscription = EventService.streamActiveEvents().listen((events) {
+      if (!mounted) return;
+      if (_events.isNotEmpty && events.length > _events.length) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(children: [const Icon(Icons.celebration, color: Colors.white), const SizedBox(width: 8), const Text('Yeni bir etkinlik eklendi!')]),
+            backgroundColor: const Color(0xFF10B981),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          )
+        );
+      }
+      setState(() => _events = events);
+      _addEventMarkers();
+    });
   }
 
   void _onMapCreated(MapboxMap mapboxMap) async {
@@ -144,12 +173,16 @@ class _MapScreenState extends State<MapScreen> {
 
   Future<void> _addEventMarkers() async {
     if (_mapboxMap == null) return;
-    final annotationManager = await _mapboxMap!.annotations.createPointAnnotationManager();
+    if (_eventAnnotationManager == null) {
+      _eventAnnotationManager = await _mapboxMap!.annotations.createPointAnnotationManager();
+    } else {
+      await _eventAnnotationManager!.deleteAll();
+    }
     for (final event in _events) {
       if (!event.hasLocation) continue;
       if (_activeFilter != 'Tümü' && event.category.displayName != _activeFilter) continue;
       final iconBytes = await _createMarkerIcon(event.category.color);
-      await annotationManager.create(PointAnnotationOptions(
+      await _eventAnnotationManager!.create(PointAnnotationOptions(
         geometry: Point(coordinates: Position(event.longitude!, event.latitude!)),
         image: iconBytes, iconSize: 0.5,
         textField: '🎯 ${event.title}', textSize: 11.0,
@@ -312,8 +345,7 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   void _openCreateEvent() async {
-    final result = await Navigator.push(context, MaterialPageRoute(builder: (_) => const CreateEventScreen()));
-    if (result == true) _loadEvents();
+    await Navigator.push(context, MaterialPageRoute(builder: (_) => const CreateEventScreen()));
   }
 
   Widget _buildSearchBar() {
@@ -500,7 +532,47 @@ class _MapScreenState extends State<MapScreen> {
               const SizedBox(height: 8),
               Text(event.description, style: const TextStyle(color: Colors.white60, fontSize: 13), maxLines: 2),
             ],
-            const SizedBox(height: 12),
+            StreamBuilder<List<Map<String, dynamic>>>(
+              stream: EventService.streamEventParticipants(event.id),
+              builder: (context, snapshot) {
+                final participants = snapshot.data ?? [];
+                final count = participants.length;
+                final currentUserId = Supabase.instance.client.auth.currentUser?.id;
+                final isGoing = participants.any((p) => p['user_id'] == currentUserId);
+                
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.people, color: Colors.white54, size: 18),
+                          const SizedBox(width: 6),
+                          Text('$count kişi gidiyor', style: const TextStyle(color: Colors.white70)),
+                        ]
+                      ),
+                      ElevatedButton(
+                        onPressed: () async {
+                          if (isGoing) {
+                            await EventService.leaveEvent(event.id);
+                          } else {
+                            await EventService.joinEvent(event.id);
+                          }
+                        },
+    style: ElevatedButton.styleFrom(
+  backgroundColor: isGoing ? Colors.white24 : const Color(0xFF10B981),
+  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+  minimumSize: const ui.Size(0, 0), // Başına ui. ekledik
+),
+                        child: Text(isGoing ? 'Vazgeç' : 'Gidiyorum', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                      )
+                    ],
+                  ),
+                );
+              }
+            ),
             SizedBox(width: double.infinity, height: 44,
               child: ElevatedButton.icon(
                 icon: const Icon(Icons.navigation_rounded, color: Colors.white, size: 20),
@@ -569,13 +641,14 @@ class _MapScreenState extends State<MapScreen> {
               backgroundColor: const Color(0xCC1A1A2E),
               child: const Icon(Icons.camera_alt, color: Color(0xFF7c6cf0))),
           ),
-          // Etkinlik Oluştur Butonu
-          Positioned(
-            bottom: _selectedDestination == null && _selectedEvent == null ? 136 : 292, right: 16,
-            child: FloatingActionButton(heroTag: 'create_event_btn', mini: true,
-              onPressed: _openCreateEvent, backgroundColor: const Color(0xCC1A1A2E),
-              child: const Icon(Icons.add, color: Color(0xFF10B981))),
-          ),
+          // Etkinlik Oluştur Butonu (Sadece Organizatörler)
+          if (_isOrganizer)
+            Positioned(
+              bottom: _selectedDestination == null && _selectedEvent == null ? 136 : 292, right: 16,
+              child: FloatingActionButton(heroTag: 'create_event_btn', mini: true,
+                onPressed: _openCreateEvent, backgroundColor: const Color(0xCC1A1A2E),
+                child: const Icon(Icons.add, color: Color(0xFF10B981))),
+            ),
           // Event seçili kart veya rota bilgisi
           if (_selectedEvent != null) _buildEventCard()
           else _buildInfoOverlay(),
