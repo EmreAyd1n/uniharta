@@ -14,6 +14,7 @@ import '../services/gemini_service.dart';
 import 'ar_camera_screen.dart';
 import 'create_event_screen.dart';
 import 'package:geolocator/geolocator.dart' as geo;
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'dart:async';
 
 class MapScreen extends StatefulWidget {
@@ -45,6 +46,9 @@ class _MapScreenState extends State<MapScreen> {
   bool _isOrganizer = false;
   StreamSubscription<List<EventModel>>? _eventsSubscription;
   PointAnnotationManager? _eventAnnotationManager;
+  
+  bool _isOffline = false;
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
 
   final List<String> _filterCategories = [
     'Tümü', 'Seminer', 'Spor', 'Yemek', 'Eğlence'
@@ -52,6 +56,7 @@ class _MapScreenState extends State<MapScreen> {
 
   @override
   void dispose() {
+    _connectivitySubscription?.cancel();
     _eventsSubscription?.cancel();
     _positionStreamSubscription?.cancel();
     _searchController.dispose();
@@ -65,6 +70,22 @@ class _MapScreenState extends State<MapScreen> {
     MapboxOptions.setAccessToken(accessToken);
     _checkUserRole();
     _startEventsStream();
+    _initConnectivity();
+  }
+
+  Future<void> _initConnectivity() async {
+    final result = await Connectivity().checkConnectivity();
+    _updateConnectionStatus(result);
+    _connectivitySubscription = Connectivity().onConnectivityChanged.listen(_updateConnectionStatus);
+  }
+
+  void _updateConnectionStatus(List<ConnectivityResult> result) {
+    final isOffline = result.contains(ConnectivityResult.none) || result.isEmpty;
+    if (mounted) {
+      setState(() {
+        _isOffline = isOffline;
+      });
+    }
   }
 
   Future<void> _checkUserRole() async {
@@ -345,6 +366,12 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   void _openCreateEvent() async {
+    if (_isOffline) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('İnternet bağlantısı gerekiyor'), backgroundColor: Colors.redAccent)
+      );
+      return;
+    }
     await Navigator.push(context, MaterialPageRoute(builder: (_) => const CreateEventScreen()));
   }
 
@@ -436,7 +463,7 @@ class _MapScreenState extends State<MapScreen> {
   Widget _buildSearchResultBanner() {
     if (_searchResultText == null) return const SizedBox.shrink();
     return Positioned(
-      top: MediaQuery.of(context).padding.top + 120,
+      top: MediaQuery.of(context).padding.top + 120 + (_isOffline ? 46 : 0),
       left: 16, right: 16,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -554,6 +581,12 @@ class _MapScreenState extends State<MapScreen> {
                       ),
                       ElevatedButton(
                         onPressed: () async {
+                          if (_isOffline) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('İnternet bağlantısı gerekiyor'), backgroundColor: Colors.redAccent)
+                            );
+                            return;
+                          }
                           if (isGoing) {
                             await EventService.leaveEvent(event.id);
                           } else {
@@ -561,7 +594,7 @@ class _MapScreenState extends State<MapScreen> {
                           }
                         },
     style: ElevatedButton.styleFrom(
-  backgroundColor: isGoing ? Colors.white24 : const Color(0xFF10B981),
+  backgroundColor: _isOffline ? Colors.grey : (isGoing ? Colors.white24 : const Color(0xFF10B981)),
   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
   minimumSize: const ui.Size(0, 0), // Başına ui. ekledik
@@ -593,6 +626,31 @@ class _MapScreenState extends State<MapScreen> {
     );
   }
 
+  Widget _buildOfflineBanner() {
+    if (!_isOffline) return const SizedBox.shrink();
+    return Positioned(
+      top: MediaQuery.of(context).padding.top + 60,
+      left: 16, right: 16,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
+        decoration: BoxDecoration(
+          color: Colors.redAccent.withAlpha(220),
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [BoxShadow(color: Colors.black.withAlpha(120), blurRadius: 8, offset: const Offset(0, 4))],
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: const [
+            Icon(Icons.wifi_off, color: Colors.white, size: 18),
+            SizedBox(width: 8),
+            Text('Çevrimdışı Mod - Yerel Veriler Gösteriliyor', 
+              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -610,6 +668,8 @@ class _MapScreenState extends State<MapScreen> {
           _buildFilterChips(),
           // Arama Sonucu Banner
           _buildSearchResultBanner(),
+          // Çevrimdışı Banner
+          _buildOfflineBanner(),
           // Çıkış butonu
           Positioned(
             top: MediaQuery.of(context).padding.top + 12, right: 16,

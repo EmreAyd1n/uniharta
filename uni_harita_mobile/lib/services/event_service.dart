@@ -1,5 +1,7 @@
+import 'dart:io';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/event_model.dart';
+import 'local_database_service.dart';
 
 class EventService {
   static final _client = Supabase.instance.client;
@@ -8,33 +10,54 @@ class EventService {
   static Future<List<EventModel>> fetchActiveEvents() async {
     final todayStart = DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day).toIso8601String();
 
-    final response = await _client
-        .from('events')
-        .select()
-        .eq('is_active', true)
-        .gte('start_time', todayStart)
-        .order('start_time', ascending: true);
+    try {
+      final response = await _client
+          .from('events')
+          .select()
+          .eq('is_active', true)
+          .gte('start_time', todayStart)
+          .order('start_time', ascending: true);
 
-    return (response as List)
-        .map((json) => EventModel.fromJson(json as Map<String, dynamic>))
-        .toList();
+      final events = (response as List)
+          .map((json) => EventModel.fromJson(json as Map<String, dynamic>))
+          .toList();
+          
+      // Cache'e kaydet
+      await LocalDatabaseService().cacheEvents(events);
+      return events;
+    } on SocketException {
+      print('Network error, loading from cache...');
+      return await LocalDatabaseService().getCachedEvents();
+    } catch (e) {
+      print('Fetch active events error: $e');
+      return await LocalDatabaseService().getCachedEvents();
+    }
   }
 
   /// Kategoriye göre aktif etkinlikleri çeker
   static Future<List<EventModel>> fetchEventsByCategory(String category) async {
     final todayStart = DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day).toIso8601String();
 
-    final response = await _client
-        .from('events')
-        .select()
-        .eq('is_active', true)
-        .eq('category', category)
-        .gte('start_time', todayStart)
-        .order('start_time', ascending: true);
+    try {
+      final response = await _client
+          .from('events')
+          .select()
+          .eq('is_active', true)
+          .eq('category', category)
+          .gte('start_time', todayStart)
+          .order('start_time', ascending: true);
 
-    return (response as List)
-        .map((json) => EventModel.fromJson(json as Map<String, dynamic>))
-        .toList();
+      final events = (response as List)
+          .map((json) => EventModel.fromJson(json as Map<String, dynamic>))
+          .toList();
+          
+      await LocalDatabaseService().cacheEvents(events);
+      return events;
+    } on SocketException {
+      return await LocalDatabaseService().getCachedEvents(category: category);
+    } catch (e) {
+      return await LocalDatabaseService().getCachedEvents(category: category);
+    }
   }
 
   /// Yeni etkinlik oluşturur
@@ -55,39 +78,65 @@ class EventService {
 
   /// Tüm aktif etkinlikleri çeker (filtre olmadan)
   static Future<List<EventModel>> fetchAllEvents() async {
-    final response = await _client
-        .from('events')
-        .select()
-        .eq('is_active', true)
-        .order('start_time', ascending: true);
+    try {
+      final response = await _client
+          .from('events')
+          .select()
+          .eq('is_active', true)
+          .order('start_time', ascending: true);
 
-    return (response as List)
-        .map((json) => EventModel.fromJson(json as Map<String, dynamic>))
-        .toList();
+      final events = (response as List)
+          .map((json) => EventModel.fromJson(json as Map<String, dynamic>))
+          .toList();
+          
+      await LocalDatabaseService().cacheEvents(events);
+      return events;
+    } on SocketException {
+      return await LocalDatabaseService().getCachedEvents();
+    } catch (e) {
+      return await LocalDatabaseService().getCachedEvents();
+    }
   }
 
   /// Gerçek zamanlı aktif etkinlikleri dinler
-static Stream<List<EventModel>> streamActiveEvents() {
+static Stream<List<EventModel>> streamActiveEvents() async* {
   final todayStart = DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day);
   
-  return _client
-      .from('events')
-      .stream(primaryKey: ['id'])
-      .eq('is_active', true) // Supabase Stream sadece 'eq' destekler
-      .map((maps) {
-        // 1. Gelen ham verileri EventModel listesine çeviriyoruz
-        final events = maps.map((map) => EventModel.fromJson(map)).toList();
-        
-        // 2. [gte] yerine: Bugünün başlangıcından sonraki etkinlikleri Dart ile filtreliyoruz
-        final filteredEvents = events.where((event) => 
-          event.startTime.isAfter(todayStart) || event.startTime.isAtSameMomentAs(todayStart)
-        ).toList();
-        
-        // 3. [order] yerine: Etkinlikleri tarihe göre yakından uzağa sıralıyoruz
-        filteredEvents.sort((a, b) => a.startTime.compareTo(b.startTime));
-        
-        return filteredEvents;
-      });
+  // 1. Önce önbellekten verileri anında gönder (Offline fallback ve hızlı açılış için)
+  try {
+    final cachedEvents = await LocalDatabaseService().getCachedEvents();
+    if (cachedEvents.isNotEmpty) {
+      yield cachedEvents;
+    }
+  } catch (_) {}
+
+  // 2. Supabase Realtime Stream başlat
+  try {
+    yield* _client
+        .from('events')
+        .stream(primaryKey: ['id'])
+        .eq('is_active', true) // Supabase Stream sadece 'eq' destekler
+        .map((maps) {
+          // 1. Gelen ham verileri EventModel listesine çeviriyoruz
+          final events = maps.map((map) => EventModel.fromJson(map)).toList();
+          
+          // 2. [gte] yerine: Bugünün başlangıcından sonraki etkinlikleri Dart ile filtreliyoruz
+          final filteredEvents = events.where((event) => 
+            event.startTime.isAfter(todayStart) || event.startTime.isAtSameMomentAs(todayStart)
+          ).toList();
+          
+          // 3. [order] yerine: Etkinlikleri tarihe göre yakından uzağa sıralıyoruz
+          filteredEvents.sort((a, b) => a.startTime.compareTo(b.startTime));
+          
+          // 4. Arka planda sessizce önbelleğe kaydet
+          LocalDatabaseService().cacheEvents(filteredEvents);
+          
+          return filteredEvents;
+        });
+  } catch (e) {
+    print('Supabase stream error: $e');
+    // Hata olursa stream kapanır, UI son cache edilen veriyle devam eder.
+  }
 }
 
   /// Bir etkinliğe katıl
