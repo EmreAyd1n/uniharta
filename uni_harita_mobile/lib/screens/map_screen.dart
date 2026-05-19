@@ -43,6 +43,14 @@ class _MapScreenState extends State<MapScreen> {
   String? _searchResultText;
   EventModel? _selectedEvent;
   
+  // Animation-retaining fields to allow smooth slide-down transitions
+  EventModel? _lastSelectedEvent;
+  CampusLocation? _lastSelectedDestination;
+  num? _lastRouteDistance;
+  num? _lastRouteDuration;
+  String? _lastActiveFilter;
+  final Map<String, List<EventModel>> _annotationToClusterMap = {};
+  
   bool _isOrganizer = false;
   StreamSubscription<List<EventModel>>? _eventsSubscription;
   PointAnnotationManager? _eventAnnotationManager;
@@ -102,9 +110,27 @@ class _MapScreenState extends State<MapScreen> {
     }
   }
 
+  bool _areEventListsEqual(List<EventModel> a, List<EventModel> b) {
+    if (a.length != b.length) return false;
+    for (int i = 0; i < a.length; i++) {
+      if (a[i].id != b[i].id ||
+          a[i].title != b[i].title ||
+          a[i].description != b[i].description ||
+          a[i].latitude != b[i].latitude ||
+          a[i].longitude != b[i].longitude ||
+          a[i].category != b[i].category) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   void _startEventsStream() {
     _eventsSubscription = EventService.streamActiveEvents().listen((events) {
       if (!mounted) return;
+      if (_areEventListsEqual(_events, events)) {
+        return;
+      }
       if (_events.isNotEmpty && events.length > _events.length) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -141,6 +167,17 @@ class _MapScreenState extends State<MapScreen> {
       }
       _positionStreamSubscription = LocationService.getPositionStream().listen((geo.Position position) {
         if (!mounted) return;
+        if (_currentPosition != null) {
+          final distance = geo.Geolocator.distanceBetween(
+            _currentPosition!.latitude,
+            _currentPosition!.longitude,
+            position.latitude,
+            position.longitude,
+          );
+          if (distance < 5.0) {
+            return;
+          }
+        }
         setState(() => _currentPosition = position);
         if (_selectedDestination != null) _drawRoute(_selectedDestination!);
       });
@@ -196,22 +233,158 @@ class _MapScreenState extends State<MapScreen> {
     if (_mapboxMap == null) return;
     if (_eventAnnotationManager == null) {
       _eventAnnotationManager = await _mapboxMap!.annotations.createPointAnnotationManager();
+      _eventAnnotationManager!.addOnPointAnnotationClickListener(
+        MyPointAnnotationClickListener((annotation) {
+          final cluster = _annotationToClusterMap[annotation.id];
+          if (cluster == null || cluster.isEmpty) return;
+          if (cluster.length == 1) {
+            setState(() {
+              _selectedEvent = cluster.first;
+              _lastSelectedEvent = cluster.first;
+              _selectedDestination = null;
+            });
+          } else {
+            _showClusterSelectionSheet(cluster);
+          }
+        })
+      );
     } else {
       await _eventAnnotationManager!.deleteAll();
     }
-    for (final event in _events) {
-      if (!event.hasLocation) continue;
-      if (_activeFilter != 'Tümü' && event.category.displayName != _activeFilter) continue;
-      final iconBytes = await _createMarkerIcon(event.category.color);
-      await _eventAnnotationManager!.create(PointAnnotationOptions(
-        geometry: Point(coordinates: Position(event.longitude!, event.latitude!)),
-        image: iconBytes, iconSize: 0.5,
-        textField: '🎯 ${event.title}', textSize: 11.0,
-        textColor: Colors.white.toARGB32(),
-        textHaloColor: Colors.black.toARGB32(),
-        textHaloWidth: 1.5, textOffset: [0.0, 2.5],
-      ));
+
+    final filteredEvents = _events.where((event) {
+      if (!event.hasLocation) return false;
+      if (_activeFilter != 'Tümü' && event.category.displayName != _activeFilter) return false;
+      return true;
+    }).toList();
+
+    final List<List<EventModel>> clusters = [];
+    for (final event in filteredEvents) {
+      bool addedToCluster = false;
+      for (var cluster in clusters) {
+        final first = cluster.first;
+        final latDiff = (first.latitude! - event.latitude!).abs();
+        final lngDiff = (first.longitude! - event.longitude!).abs();
+        if (latDiff < 0.00045 && lngDiff < 0.00045) {
+          cluster.add(event);
+          addedToCluster = true;
+          break;
+        }
+      }
+      if (!addedToCluster) {
+        clusters.add([event]);
+      }
     }
+
+    _annotationToClusterMap.clear();
+    for (final cluster in clusters) {
+      if (cluster.isEmpty) continue;
+      PointAnnotationOptions options;
+      if (cluster.length == 1) {
+        final event = cluster.first;
+        final iconBytes = await _createMarkerIcon(event.category.color);
+        options = PointAnnotationOptions(
+          geometry: Point(coordinates: Position(event.longitude!, event.latitude!)),
+          image: iconBytes,
+          iconSize: 0.5,
+          textField: '🎯 ${event.title}',
+          textSize: 11.0,
+          textColor: Colors.white.toARGB32(),
+          textHaloColor: Colors.black.toARGB32(),
+          textHaloWidth: 1.5,
+          textOffset: [0.0, 2.5],
+        );
+      } else {
+        // Altın rengi cluster marker
+        final iconBytes = await _createMarkerIcon(const Color(0xFFFFD700));
+        final latSum = cluster.fold<double>(0, (sum, e) => sum + e.latitude!) / cluster.length;
+        final lngSum = cluster.fold<double>(0, (sum, e) => sum + e.longitude!) / cluster.length;
+        options = PointAnnotationOptions(
+          geometry: Point(coordinates: Position(lngSum, latSum)),
+          image: iconBytes,
+          iconSize: 0.65,
+          textField: '🎯 (${cluster.length} Etkinlik)',
+          textSize: 12.0,
+          textColor: const Color(0xFFFFD700).toARGB32(),
+          textHaloColor: Colors.black.toARGB32(),
+          textHaloWidth: 2.0,
+          textOffset: [0.0, 2.8],
+        );
+      }
+
+      final annotation = await _eventAnnotationManager!.create(options);
+      _annotationToClusterMap[annotation.id] = cluster;
+    }
+  }
+
+  void _showClusterSelectionSheet(List<EventModel> cluster) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      backgroundColor: const Color(0xFF1E1E2C),
+      builder: (ctx) {
+        return Container(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                  color: Colors.grey[600],
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Text(
+                'Bu Konumdaki Etkinlikler (${cluster.length})',
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Flexible(
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: cluster.length,
+                  itemBuilder: (ctx2, index) {
+                    final event = cluster[index];
+                    return ListTile(
+                      leading: CircleAvatar(
+                        backgroundColor: event.category.color.withAlpha(40),
+                        child: Icon(event.category.icon, color: event.category.color, size: 20),
+                      ),
+                      title: Text(
+                        event.title,
+                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                      ),
+                      subtitle: Text(
+                        event.category.displayName,
+                        style: TextStyle(color: event.category.color, fontSize: 12),
+                      ),
+                      trailing: const Icon(Icons.arrow_forward_ios, color: Colors.white54, size: 14),
+                      onTap: () {
+                        Navigator.pop(ctx2);
+                        setState(() {
+                          _selectedEvent = event;
+                          _lastSelectedEvent = event;
+                          _selectedDestination = null;
+                        });
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _handleLogout() async {
@@ -222,7 +395,9 @@ class _MapScreenState extends State<MapScreen> {
     if (_mapboxMap == null) return;
     setState(() {
       _selectedDestination = destination;
-      _routeDistance = null; _routeDuration = null;
+      _lastSelectedDestination = destination;
+      _routeDistance = null;
+      _routeDuration = null;
     });
     final start = _currentPosition != null
         ? Position(_currentPosition!.longitude, _currentPosition!.latitude)
@@ -265,9 +440,16 @@ class _MapScreenState extends State<MapScreen> {
           null, null, null, null,
         );
         await _mapboxMap!.flyTo(cameraOptions, MapAnimationOptions(duration: 1200));
-      } catch (e) { print('Camera adjust error: $e'); }
-      if (mounted) setState(() { _routeDistance = distance; _routeDuration = duration; });
-    } catch (e) { print('Route drawing error: $e'); }
+      } catch (e) { debugPrint('Camera adjust error: $e'); }
+      if (mounted) {
+        setState(() {
+          _routeDistance = distance;
+          _routeDuration = duration;
+          _lastRouteDistance = distance;
+          _lastRouteDuration = duration;
+        });
+      }
+    } catch (e) { debugPrint('Route drawing error: $e'); }
   }
 
   Future<void> _drawRouteToEvent(EventModel event) async {
@@ -317,11 +499,21 @@ class _MapScreenState extends State<MapScreen> {
         ),
         MapAnimationOptions(duration: 1200),
       );
+      setState(() {
+        _selectedEvent = e;
+        _lastSelectedEvent = e;
+        _selectedDestination = null;
+      });
     }
   }
 
   void _onFilterChanged(String filter) {
-    setState(() => _activeFilter = filter);
+    setState(() {
+      _activeFilter = filter;
+      if (filter != 'Tümü') {
+        _lastActiveFilter = filter;
+      }
+    });
     // Event marker'ları yeniden ekle (basit yaklaşım)
     _addEventMarkers();
   }
@@ -486,141 +678,187 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   Widget _buildInfoOverlay() {
-    if (_selectedDestination == null || _routeDistance == null || _routeDuration == null) return const SizedBox.shrink();
-    final distanceText = _routeDistance! < 1000 ? '${_routeDistance!.toInt()} Metre' : '${(_routeDistance! / 1000).toStringAsFixed(1)} KM';
-    final durationText = '${(_routeDuration! / 60).ceil()} Dakika';
-    return Positioned(
-      bottom: 24, left: 16, right: 16,
-      child: Card(
-        elevation: 12,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        color: const Color(0xFF1E1E2C),
-        child: Padding(
-          padding: const EdgeInsets.all(20.0),
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
+    final destination = _selectedDestination ?? _lastSelectedDestination;
+    final distance = _routeDistance ?? _lastRouteDistance;
+    final duration = _routeDuration ?? _lastRouteDuration;
+    if (destination == null || distance == null || duration == null) return const SizedBox.shrink();
+    final distanceText = distance < 1000 ? '${distance.toInt()} Metre' : '${(distance / 1000).toStringAsFixed(1)} KM';
+    final durationText = '${(duration / 60).ceil()} Dakika';
+    return Card(
+      elevation: 12,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      color: const Color(0xFF1E1E2C),
+      child: Padding(
+        padding: const EdgeInsets.all(20.0),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Row(children: [
+            CircleAvatar(radius: 24, backgroundColor: destination.color.withAlpha(50),
+              child: Icon(Icons.flag, color: destination.color, size: 28)),
+            const SizedBox(width: 16),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('Varış Noktası', style: TextStyle(color: Colors.grey, fontSize: 13)),
+              Text(destination.name, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+            ])),
+            IconButton(icon: const Icon(Icons.close, color: Colors.grey), onPressed: () {
+              setState(() { _selectedDestination = null; _selectedEvent = null; });
+              _mapboxMap?.style.removeStyleLayer('route-layer').catchError((_) {});
+              _mapboxMap?.style.removeStyleSource('route-source').catchError((_) {});
+            }),
+          ]),
+          const Padding(padding: EdgeInsets.symmetric(vertical: 12.0), child: Divider(color: Colors.white24, height: 1)),
+          Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
             Row(children: [
-              CircleAvatar(radius: 24, backgroundColor: _selectedDestination!.color.withAlpha(50),
-                child: Icon(Icons.flag, color: _selectedDestination!.color, size: 28)),
-              const SizedBox(width: 16),
-              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                const Text('Varış Noktası', style: TextStyle(color: Colors.grey, fontSize: 13)),
-                Text(_selectedDestination!.name, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-              ])),
-              IconButton(icon: const Icon(Icons.close, color: Colors.grey), onPressed: () {
-                setState(() { _selectedDestination = null; _selectedEvent = null; });
-                _mapboxMap?.style.removeStyleLayer('route-layer').catchError((_) {});
-                _mapboxMap?.style.removeStyleSource('route-source').catchError((_) {});
-              }),
+              const Icon(Icons.directions_walk, color: Colors.greenAccent, size: 24),
+              const SizedBox(width: 8),
+              Text(distanceText, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
             ]),
-            const Padding(padding: EdgeInsets.symmetric(vertical: 12.0), child: Divider(color: Colors.white24, height: 1)),
-            Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
-              Row(children: [
-                const Icon(Icons.directions_walk, color: Colors.greenAccent, size: 24),
-                const SizedBox(width: 8),
-                Text(distanceText, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
-              ]),
-              Container(height: 24, width: 1, color: Colors.white24),
-              Row(children: [
-                const Icon(Icons.timer, color: Colors.orangeAccent, size: 24),
-                const SizedBox(width: 8),
-                Text(durationText, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
-              ]),
+            Container(height: 24, width: 1, color: Colors.white24),
+            Row(children: [
+              const Icon(Icons.timer, color: Colors.orangeAccent, size: 24),
+              const SizedBox(width: 8),
+              Text(durationText, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
             ]),
           ]),
-        ),
+        ]),
       ),
     );
   }
 
   Widget _buildEventCard() {
-    if (_selectedEvent == null) return const SizedBox.shrink();
-    final event = _selectedEvent!;
-    return Positioned(
-      bottom: 24, left: 16, right: 16,
-      child: Card(
-        elevation: 12,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        color: const Color(0xFF1E1E2C),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Row(children: [
-              CircleAvatar(radius: 22, backgroundColor: event.category.color.withAlpha(40),
-                child: Icon(event.category.icon, color: event.category.color, size: 22)),
-              const SizedBox(width: 12),
-              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(event.title, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
-                Text(event.category.displayName, style: TextStyle(color: event.category.color, fontSize: 12)),
-              ])),
-              IconButton(icon: const Icon(Icons.close, color: Colors.grey, size: 20),
-                onPressed: () => setState(() => _selectedEvent = null)),
-            ]),
-            if (event.description.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Text(event.description, style: const TextStyle(color: Colors.white60, fontSize: 13), maxLines: 2),
-            ],
-            StreamBuilder<List<Map<String, dynamic>>>(
-              stream: EventService.streamEventParticipants(event.id),
-              builder: (context, snapshot) {
-                final participants = snapshot.data ?? [];
-                final count = participants.length;
-                final currentUserId = Supabase.instance.client.auth.currentUser?.id;
-                final isGoing = participants.any((p) => p['user_id'] == currentUserId);
-                
-                return Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Row(
-                        children: [
-                          const Icon(Icons.people, color: Colors.white54, size: 18),
-                          const SizedBox(width: 6),
-                          Text('$count kişi gidiyor', style: const TextStyle(color: Colors.white70)),
-                        ]
+    final event = _selectedEvent ?? _lastSelectedEvent;
+    if (event == null) return const SizedBox.shrink();
+    return Card(
+      elevation: 12,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      color: const Color(0xFF1E1E2C),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Row(children: [
+            CircleAvatar(radius: 22, backgroundColor: event.category.color.withAlpha(40),
+              child: Icon(event.category.icon, color: event.category.color, size: 22)),
+            const SizedBox(width: 12),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(event.title, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+              Text(event.category.displayName, style: TextStyle(color: event.category.color, fontSize: 12)),
+            ])),
+            IconButton(icon: const Icon(Icons.close, color: Colors.grey, size: 20),
+              onPressed: () => setState(() => _selectedEvent = null)),
+          ]),
+          if (event.description.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(event.description, style: const TextStyle(color: Colors.white60, fontSize: 13), maxLines: 2),
+          ],
+          StreamBuilder<List<Map<String, dynamic>>>(
+            stream: EventService.streamEventParticipants(event.id),
+            builder: (context, snapshot) {
+              final participants = snapshot.data ?? [];
+              final count = participants.length;
+              final currentUserId = Supabase.instance.client.auth.currentUser?.id;
+              final isGoing = participants.any((p) => p['user_id'] == currentUserId);
+              
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.people, color: Colors.white54, size: 18),
+                        const SizedBox(width: 6),
+                        Text('$count kişi gidiyor', style: const TextStyle(color: Colors.white70)),
+                      ]
+                    ),
+                    ElevatedButton(
+                      onPressed: () async {
+                        if (_isOffline) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('İnternet bağlantısı gerekiyor'), backgroundColor: Colors.redAccent)
+                          );
+                          return;
+                        }
+                        if (isGoing) {
+                          await EventService.leaveEvent(event.id);
+                        } else {
+                          await EventService.joinEvent(event.id);
+                        }
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _isOffline ? Colors.grey : (isGoing ? Colors.white24 : const Color(0xFF10B981)),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        minimumSize: const ui.Size(0, 0),
                       ),
-                      ElevatedButton(
-                        onPressed: () async {
-                          if (_isOffline) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('İnternet bağlantısı gerekiyor'), backgroundColor: Colors.redAccent)
-                            );
-                            return;
-                          }
-                          if (isGoing) {
-                            await EventService.leaveEvent(event.id);
-                          } else {
-                            await EventService.joinEvent(event.id);
-                          }
-                        },
-    style: ElevatedButton.styleFrom(
-  backgroundColor: _isOffline ? Colors.grey : (isGoing ? Colors.white24 : const Color(0xFF10B981)),
-  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-  minimumSize: const ui.Size(0, 0), // Başına ui. ekledik
-),
-                        child: Text(isGoing ? 'Vazgeç' : 'Gidiyorum', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                      )
-                    ],
-                  ),
-                );
-              }
-            ),
-            SizedBox(width: double.infinity, height: 44,
-              child: ElevatedButton.icon(
-                icon: const Icon(Icons.navigation_rounded, color: Colors.white, size: 20),
-                label: const Text('Oraya Git', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF800000),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      child: Text(isGoing ? 'Vazgeç' : 'Gidiyorum', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                    )
+                  ],
                 ),
-                onPressed: () {
-                  setState(() => _selectedEvent = null);
-                  _drawRouteToEvent(event);
-                },
+              );
+            }
+          ),
+          SizedBox(width: double.infinity, height: 44,
+            child: ElevatedButton.icon(
+              icon: const Icon(Icons.navigation_rounded, color: Colors.white, size: 20),
+              label: const Text('Oraya Git', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF800000),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              onPressed: () {
+                setState(() => _selectedEvent = null);
+                _drawRouteToEvent(event);
+              },
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  Widget _buildEmptyStateCard() {
+    final filter = _activeFilter != 'Tümü' ? _activeFilter : (_lastActiveFilter ?? 'Kategori');
+    return Card(
+      elevation: 12,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      color: const Color(0xFF1E1E2C),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        child: Row(
+          children: [
+            const Text(
+              '☕',
+              style: TextStyle(fontSize: 32),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Bugün kampüste sakin bir gün var',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '$filter kategorisinde aktif etkinlik bulunamadı.',
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
               ),
             ),
-          ]),
+            IconButton(
+              icon: const Icon(Icons.close, color: Colors.grey, size: 20),
+              onPressed: () => setState(() => _activeFilter = 'Tümü'),
+            ),
+          ],
         ),
       ),
     );
@@ -653,6 +891,19 @@ class _MapScreenState extends State<MapScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final filteredEvents = _events.where((event) {
+      if (!event.hasLocation) return false;
+      if (_activeFilter != 'Tümü' && event.category.displayName != _activeFilter) return false;
+      return true;
+    }).toList();
+
+    final showEventCard = _selectedEvent != null;
+    final showInfoOverlay = _selectedDestination != null && _routeDistance != null && _routeDuration != null;
+    final showEmptyState = _activeFilter != 'Tümü' && filteredEvents.isEmpty && !showEventCard && !showInfoOverlay;
+
+    final isAnyCardVisible = showEventCard || showInfoOverlay || showEmptyState;
+    final double cardHeightOffset = isAnyCardVisible ? 180.0 : 0.0;
+
     return Scaffold(
       body: Stack(
         children: [
@@ -687,15 +938,19 @@ class _MapScreenState extends State<MapScreen> {
             ),
           ),
           // GPS Butonu
-          Positioned(
-            bottom: _selectedDestination == null && _selectedEvent == null ? 24 : 180, right: 16,
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 350),
+            curve: Curves.easeInOut,
+            bottom: 24 + cardHeightOffset, right: 16,
             child: FloatingActionButton(heroTag: 'gps_btn', mini: true,
               onPressed: _focusOnUserLocation, backgroundColor: const Color(0xCC1A1A2E),
               child: const Icon(Icons.my_location, color: Colors.blueAccent)),
           ),
           // AR Kamera Butonu
-          Positioned(
-            bottom: _selectedDestination == null && _selectedEvent == null ? 80 : 236, right: 16,
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 350),
+            curve: Curves.easeInOut,
+            bottom: 80 + cardHeightOffset, right: 16,
             child: FloatingActionButton(heroTag: 'ar_btn', mini: true,
               onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ArCameraScreen())),
               backgroundColor: const Color(0xCC1A1A2E),
@@ -703,17 +958,66 @@ class _MapScreenState extends State<MapScreen> {
           ),
           // Etkinlik Oluştur Butonu (Sadece Organizatörler)
           if (_isOrganizer)
-            Positioned(
-              bottom: _selectedDestination == null && _selectedEvent == null ? 136 : 292, right: 16,
+            AnimatedPositioned(
+              duration: const Duration(milliseconds: 350),
+              curve: Curves.easeInOut,
+              bottom: 136 + cardHeightOffset, right: 16,
               child: FloatingActionButton(heroTag: 'create_event_btn', mini: true,
                 onPressed: _openCreateEvent, backgroundColor: const Color(0xCC1A1A2E),
                 child: const Icon(Icons.add, color: Color(0xFF10B981))),
             ),
-          // Event seçili kart veya rota bilgisi
-          if (_selectedEvent != null) _buildEventCard()
-          else _buildInfoOverlay(),
+          
+          // Smart bottom cards animated overlays
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 350),
+            curve: Curves.easeOutBack,
+            bottom: showEventCard ? 24 : -250,
+            left: 16,
+            right: 16,
+            child: AnimatedOpacity(
+              duration: const Duration(milliseconds: 350),
+              opacity: showEventCard ? 1.0 : 0.0,
+              child: _buildEventCard(),
+            ),
+          ),
+
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 350),
+            curve: Curves.easeOutBack,
+            bottom: showInfoOverlay ? 24 : -250,
+            left: 16,
+            right: 16,
+            child: AnimatedOpacity(
+              duration: const Duration(milliseconds: 350),
+              opacity: showInfoOverlay ? 1.0 : 0.0,
+              child: _buildInfoOverlay(),
+            ),
+          ),
+
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 350),
+            curve: Curves.easeOutBack,
+            bottom: showEmptyState ? 24 : -250,
+            left: 16,
+            right: 16,
+            child: AnimatedOpacity(
+              duration: const Duration(milliseconds: 350),
+              opacity: showEmptyState ? 1.0 : 0.0,
+              child: _buildEmptyStateCard(),
+            ),
+          ),
         ],
       ),
     );
+  }
+}
+
+class MyPointAnnotationClickListener extends OnPointAnnotationClickListener {
+  final void Function(PointAnnotation annotation) onClick;
+  MyPointAnnotationClickListener(this.onClick);
+
+  @override
+  void onPointAnnotationClick(PointAnnotation annotation) {
+    onClick(annotation);
   }
 }

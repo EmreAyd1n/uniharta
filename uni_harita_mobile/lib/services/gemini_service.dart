@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:flutter/foundation.dart';
 
 /// Gemini API'den dönen semantik analiz sonucu
 class GeminiSearchResult {
@@ -35,7 +36,7 @@ class GeminiService {
   static Future<GeminiSearchResult?> analyzeIntent(String userInput) async {
     final apiKey = dotenv.get('GEMINI_API_KEY', fallback: '');
     if (apiKey.isEmpty) {
-      print('GEMINI_API_KEY bulunamadı');
+      debugPrint('GEMINI_API_KEY bulunamadı');
       return null;
     }
 
@@ -106,11 +107,11 @@ JSON formatında yanıt ver.'''
         final parsed = jsonDecode(text) as Map<String, dynamic>;
         return GeminiSearchResult.fromJson(parsed);
       } else {
-        print('Gemini API Error ${response.statusCode}: ${response.body}');
+        debugPrint('Gemini API Error ${response.statusCode}: ${response.body}');
         return null;
       }
     } catch (e) {
-      print('Gemini API Exception: $e');
+      debugPrint('Gemini API Exception: $e');
       return null;
     }
   }

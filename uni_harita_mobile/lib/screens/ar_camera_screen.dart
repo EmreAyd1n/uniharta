@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:flutter_compass/flutter_compass.dart';
 import 'package:geolocator/geolocator.dart' as geo;
+import 'package:shimmer/shimmer.dart';
 
 import '../models/campus_location.dart';
 import '../models/event_model.dart';
@@ -429,8 +430,8 @@ class _ArCameraScreenState extends State<ArCameraScreen>
               child: CameraPreview(_cameraController!),
             )
           else
-            const Center(
-              child: CircularProgressIndicator(color: Colors.white54),
+            const Positioned.fill(
+              child: _ArCameraShimmer(),
             ),
 
           // AR Overlay Etiketler
@@ -492,6 +493,73 @@ class _ArCameraScreenState extends State<ArCameraScreen>
                     style: const TextStyle(color: Colors.white70, fontSize: 13),
                   ),
                 ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ArCameraShimmer extends StatelessWidget {
+  const _ArCameraShimmer();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: const Color(0xFF0F0F1A),
+      child: Stack(
+        children: [
+          // Center focus viewfinder
+          Center(
+            child: Shimmer.fromColors(
+              baseColor: Colors.white.withAlpha(10),
+              highlightColor: Colors.white.withAlpha(30),
+              child: Container(
+                width: 220,
+                height: 220,
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.white, width: 2),
+                  borderRadius: BorderRadius.circular(32),
+                ),
+                child: const Center(
+                  child: Icon(Icons.center_focus_weak, size: 48, color: Colors.white),
+                ),
+              ),
+            ),
+          ),
+          // Top compass skeleton card
+          Positioned(
+            top: MediaQuery.of(context).padding.top + 12,
+            left: 60,
+            right: 60,
+            child: Shimmer.fromColors(
+              baseColor: Colors.white.withAlpha(10),
+              highlightColor: Colors.white.withAlpha(30),
+              child: Container(
+                height: 40,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+              ),
+            ),
+          ),
+          // Bottom stats card skeleton
+          Positioned(
+            bottom: 24 + MediaQuery.of(context).padding.bottom,
+            left: 16,
+            right: 16,
+            child: Shimmer.fromColors(
+              baseColor: Colors.white.withAlpha(10),
+              highlightColor: Colors.white.withAlpha(30),
+              child: Container(
+                height: 56,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                ),
               ),
             ),
           ),

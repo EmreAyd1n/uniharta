@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/event_model.dart';
 import 'local_database_service.dart';
+import 'package:flutter/foundation.dart';
 
 class EventService {
   static final _client = Supabase.instance.client;
@@ -26,10 +27,10 @@ class EventService {
       await LocalDatabaseService().cacheEvents(events);
       return events;
     } on SocketException {
-      print('Network error, loading from cache...');
+      debugPrint('Network error, loading from cache...');
       return await LocalDatabaseService().getCachedEvents();
     } catch (e) {
-      print('Fetch active events error: $e');
+      debugPrint('Fetch active events error: $e');
       return await LocalDatabaseService().getCachedEvents();
     }
   }
@@ -71,7 +72,7 @@ class EventService {
 
       return EventModel.fromJson(response);
     } catch (e) {
-      print('Event create error: $e');
+      debugPrint('Event create error: $e');
       return null;
     }
   }
@@ -134,7 +135,7 @@ static Stream<List<EventModel>> streamActiveEvents() async* {
           return filteredEvents;
         });
   } catch (e) {
-    print('Supabase stream error: $e');
+    debugPrint('Supabase stream error: $e');
     // Hata olursa stream kapanır, UI son cache edilen veriyle devam eder.
   }
 }
@@ -150,7 +151,7 @@ static Stream<List<EventModel>> streamActiveEvents() async* {
       });
       return true;
     } catch (e) {
-      print('Join event error: $e');
+      debugPrint('Join event error: $e');
       return false;
     }
   }
@@ -167,7 +168,7 @@ static Stream<List<EventModel>> streamActiveEvents() async* {
           .eq('user_id', user.id);
       return true;
     } catch (e) {
-      print('Leave event error: $e');
+      debugPrint('Leave event error: $e');
       return false;
     }
   }

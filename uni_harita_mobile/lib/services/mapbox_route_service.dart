@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:flutter/foundation.dart';
 
 class MapboxRouteService {
   static Future<Map<String, dynamic>?> getWalkingRoute(Position start, Position end) async {
@@ -30,7 +31,7 @@ class MapboxRouteService {
         }
       }
     } catch (e) {
-      print('Route fetch error: $e');
+      debugPrint('Route fetch error: $e');
     }
 
     return null;

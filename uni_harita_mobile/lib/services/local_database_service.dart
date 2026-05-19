@@ -1,6 +1,7 @@
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import '../models/event_model.dart';
+import 'package:flutter/foundation.dart';
 
 class LocalDatabaseService {
   static final LocalDatabaseService _instance = LocalDatabaseService._internal();
@@ -59,7 +60,7 @@ class LocalDatabaseService {
         whereArgs: [twoDaysAgo],
       );
     } catch (e) {
-      print('Cleanup cached events error: $e');
+      debugPrint('Cleanup cached events error: $e');
     }
   }
 
@@ -84,7 +85,7 @@ class LocalDatabaseService {
     try {
       await batch.commit(noResult: true);
     } catch (e) {
-      print('Cache events error: $e');
+      debugPrint('Cache events error: $e');
     }
   }
 
@@ -123,7 +124,7 @@ class LocalDatabaseService {
       }
       return events;
     } catch (e) {
-      print('Get cached events error: $e');
+      debugPrint('Get cached events error: $e');
       return [];
     }
   }
