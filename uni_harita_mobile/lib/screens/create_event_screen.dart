@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter_map/flutter_map.dart' as fm;
+import 'package:latlong2/latlong.dart' as ll;
 
 import '../models/event_model.dart';
 import '../services/event_service.dart';
@@ -578,14 +581,19 @@ class _MapLocationPickerState extends State<_MapLocationPicker> {
   double _selectedLat = 0;
   double _selectedLng = 0;
 
+  // Web Map state
+  final fm.MapController _webMapController = fm.MapController();
+
   @override
   void initState() {
     super.initState();
     _selectedLat = widget.initialLat;
     _selectedLng = widget.initialLng;
 
-    final accessToken = dotenv.get('MAPBOX_ACCESS_TOKEN');
-    MapboxOptions.setAccessToken(accessToken);
+    if (!kIsWeb) {
+      final accessToken = dotenv.get('MAPBOX_ACCESS_TOKEN');
+      MapboxOptions.setAccessToken(accessToken);
+    }
   }
 
   void _onMapCreated(MapboxMap mapboxMap) async {
@@ -610,6 +618,13 @@ class _MapLocationPickerState extends State<_MapLocationPicker> {
     });
 
     _updateMarker(lat, lng);
+  }
+
+  void _onWebMapTapped(fm.TapPosition tapPosition, ll.LatLng point) {
+    setState(() {
+      _selectedLat = point.latitude;
+      _selectedLng = point.longitude;
+    });
   }
 
   Future<void> _updateMarker(double lat, double lng) async {
@@ -643,16 +658,60 @@ class _MapLocationPickerState extends State<_MapLocationPicker> {
       body: Stack(
         children: [
           // Harita
-          MapWidget(
-            onMapCreated: _onMapCreated,
-            cameraOptions: CameraOptions(
-              center: Point(
-                  coordinates:
-                      Position(widget.initialLng, widget.initialLat)),
-              zoom: 16.5,
-            ),
-            styleUri: MapboxStyles.MAPBOX_STREETS,
-          ),
+          kIsWeb
+              ? fm.FlutterMap(
+                  mapController: _webMapController,
+                  options: fm.MapOptions(
+                    initialCenter: ll.LatLng(widget.initialLat, widget.initialLng),
+                    initialZoom: 16.5,
+                    onTap: _onWebMapTapped,
+                  ),
+                  children: [
+                    fm.TileLayer(
+                      urlTemplate: 'https://api.mapbox.com/styles/v1/mapbox/dark-v11/tiles/{z}/{x}/{y}?access_token={accessToken}',
+                      additionalOptions: {
+                        'accessToken': dotenv.get('MAPBOX_ACCESS_TOKEN', fallback: ''),
+                      },
+                    ),
+                    fm.MarkerLayer(
+                      markers: [
+                        fm.Marker(
+                          point: ll.LatLng(_selectedLat, _selectedLng),
+                          width: 140,
+                          height: 70,
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withAlpha(200),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: Colors.redAccent),
+                                ),
+                                child: const Text(
+                                  '📍 Etkinlik Konumu',
+                                  style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                              const Icon(Icons.location_on, color: Colors.redAccent, size: 28),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                )
+              : MapWidget(
+                  onMapCreated: _onMapCreated,
+                  cameraOptions: CameraOptions(
+                    center: Point(
+                        coordinates:
+                            Position(widget.initialLng, widget.initialLat)),
+                    zoom: 16.5,
+                  ),
+                  styleUri: MapboxStyles.MAPBOX_STREETS,
+                ),
 
           // Üst bar
           Positioned(

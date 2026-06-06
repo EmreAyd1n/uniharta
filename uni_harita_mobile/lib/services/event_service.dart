@@ -24,14 +24,16 @@ class EventService {
           .toList();
           
       // Cache'e kaydet
-      await LocalDatabaseService().cacheEvents(events);
+      if (!kIsWeb) {
+        await LocalDatabaseService().cacheEvents(events);
+      }
       return events;
-    } on SocketException {
-      debugPrint('Network error, loading from cache...');
-      return await LocalDatabaseService().getCachedEvents();
     } catch (e) {
       debugPrint('Fetch active events error: $e');
-      return await LocalDatabaseService().getCachedEvents();
+      if (!kIsWeb) {
+        return await LocalDatabaseService().getCachedEvents();
+      }
+      return [];
     }
   }
 
@@ -52,12 +54,16 @@ class EventService {
           .map((json) => EventModel.fromJson(json as Map<String, dynamic>))
           .toList();
           
-      await LocalDatabaseService().cacheEvents(events);
+      if (!kIsWeb) {
+        await LocalDatabaseService().cacheEvents(events);
+      }
       return events;
-    } on SocketException {
-      return await LocalDatabaseService().getCachedEvents(category: category);
     } catch (e) {
-      return await LocalDatabaseService().getCachedEvents(category: category);
+      debugPrint('Fetch events by category error: $e');
+      if (!kIsWeb) {
+        return await LocalDatabaseService().getCachedEvents(category: category);
+      }
+      return [];
     }
   }
 
@@ -90,12 +96,16 @@ class EventService {
           .map((json) => EventModel.fromJson(json as Map<String, dynamic>))
           .toList();
           
-      await LocalDatabaseService().cacheEvents(events);
+      if (!kIsWeb) {
+        await LocalDatabaseService().cacheEvents(events);
+      }
       return events;
-    } on SocketException {
-      return await LocalDatabaseService().getCachedEvents();
     } catch (e) {
-      return await LocalDatabaseService().getCachedEvents();
+      debugPrint('Fetch all events error: $e');
+      if (!kIsWeb) {
+        return await LocalDatabaseService().getCachedEvents();
+      }
+      return [];
     }
   }
 
@@ -104,12 +114,14 @@ static Stream<List<EventModel>> streamActiveEvents() async* {
   final todayStart = DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day);
   
   // 1. Önce önbellekten verileri anında gönder (Offline fallback ve hızlı açılış için)
-  try {
-    final cachedEvents = await LocalDatabaseService().getCachedEvents();
-    if (cachedEvents.isNotEmpty) {
-      yield cachedEvents;
-    }
-  } catch (_) {}
+  if (!kIsWeb) {
+    try {
+      final cachedEvents = await LocalDatabaseService().getCachedEvents();
+      if (cachedEvents.isNotEmpty) {
+        yield cachedEvents;
+      }
+    } catch (_) {}
+  }
 
   // 2. Supabase Realtime Stream başlat
   try {
@@ -130,7 +142,9 @@ static Stream<List<EventModel>> streamActiveEvents() async* {
           filteredEvents.sort((a, b) => a.startTime.compareTo(b.startTime));
           
           // 4. Arka planda sessizce önbelleğe kaydet
-          LocalDatabaseService().cacheEvents(filteredEvents);
+          if (!kIsWeb) {
+            LocalDatabaseService().cacheEvents(filteredEvents);
+          }
           
           return filteredEvents;
         });

@@ -5,6 +5,7 @@ import 'package:camera/camera.dart';
 import 'package:flutter_compass/flutter_compass.dart';
 import 'package:geolocator/geolocator.dart' as geo;
 import 'package:shimmer/shimmer.dart';
+import 'package:flutter/foundation.dart';
 
 import '../models/campus_location.dart';
 import '../models/event_model.dart';
@@ -105,12 +106,14 @@ class _ArCameraScreenState extends State<ArCameraScreen>
       }
     });
 
-    // Pusula stream
-    _compassSubscription = FlutterCompass.events?.listen((event) {
-      if (mounted && event.heading != null) {
-        setState(() => _currentHeading = event.heading);
-      }
-    });
+    // Pusula stream (sadece mobil için)
+    if (!kIsWeb) {
+      _compassSubscription = FlutterCompass.events?.listen((event) {
+        if (mounted && event.heading != null) {
+          setState(() => _currentHeading = event.heading);
+        }
+      });
+    }
   }
 
   Future<void> _loadEvents() async {
@@ -144,6 +147,7 @@ class _ArCameraScreenState extends State<ArCameraScreen>
 
   /// Görüş açısındaki binaları hesapla
   List<_ArOverlayItem> _calculateVisibleItems() {
+    if (kIsWeb) return [];
     if (_currentPosition == null || _currentHeading == null) return [];
 
     final items = <_ArOverlayItem>[];
@@ -415,10 +419,204 @@ class _ArCameraScreenState extends State<ArCameraScreen>
     return 'KB';
   }
 
+  Widget _buildWebOverlayList(double screenWidth) {
+    final userLat = _currentPosition?.latitude ?? 38.6795;
+    final userLng = _currentPosition?.longitude ?? 39.1995;
+    
+    final items = <_ArOverlayItem>[];
+    for (final location in CampusLocation.locations) {
+      final distance = geo.Geolocator.distanceBetween(
+        userLat,
+        userLng,
+        location.latitude,
+        location.longitude,
+      );
+      
+      if (distance > _maxDistance) continue;
+      
+      final relatedEvents = _activeEvents.where((e) {
+        if (!e.hasLocation) return false;
+        final eventDist = geo.Geolocator.distanceBetween(
+          location.latitude,
+          location.longitude,
+          e.latitude!,
+          e.longitude!,
+        );
+        return eventDist < 50; // 50m yakınındaki etkinlikler
+      }).toList();
+      
+      items.add(_ArOverlayItem(
+        location: location,
+        distance: distance,
+        horizontalPosition: 0.0,
+        events: relatedEvents,
+      ));
+    }
+    
+    items.sort((a, b) => a.distance.compareTo(b.distance));
+    
+    if (items.isEmpty) {
+      return Center(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+          decoration: BoxDecoration(
+            color: Colors.black.withAlpha(160),
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: const Text('Yakında kampüs lokasyonu bulunamadı', style: TextStyle(color: Colors.white70)),
+        ),
+      );
+    }
+    
+    return ListView.builder(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      itemCount: items.length,
+      itemBuilder: (context, index) {
+        final item = items[index];
+        final distanceText = item.distance < 1000
+            ? '${item.distance.toInt()}m'
+            : '${(item.distance / 1000).toStringAsFixed(1)}km';
+            
+        return Container(
+          width: 220,
+          margin: const EdgeInsets.only(right: 16),
+          decoration: BoxDecoration(
+            color: Colors.black.withAlpha(180),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: item.location.color.withAlpha(150),
+              width: 1.5,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: item.location.color.withAlpha(60),
+                blurRadius: 15,
+                spreadRadius: 1,
+              ),
+            ],
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Header
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        item.location.color.withAlpha(100),
+                        item.location.color.withAlpha(40),
+                      ],
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(item.location.icon, color: Colors.white, size: 18),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          item.location.name,
+                          style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                // Content
+                Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Row(
+                            children: [
+                              const Icon(Icons.straighten, color: Colors.white70, size: 14),
+                              const SizedBox(width: 4),
+                              Text(distanceText, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                            ],
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: item.location.color.withAlpha(60),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              item.location.category,
+                              style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      if (item.events.isNotEmpty) ...[
+                        const Text('Aktif Etkinlikler:', style: TextStyle(color: Colors.white60, fontSize: 10, fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 4),
+                        ...item.events.take(1).map((event) {
+                          return Row(
+                            children: [
+                              Icon(event.category.icon, size: 12, color: event.category.color),
+                              const SizedBox(width: 4),
+                              Expanded(
+                                child: Text(
+                                  event.title,
+                                  style: const TextStyle(color: Colors.white, fontSize: 11),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                               ),
+                            ],
+                          );
+                        }).toList(),
+                      ] else ...[
+                        const Row(
+                          children: [
+                            Icon(Icons.calendar_today_outlined, size: 12, color: Colors.white30),
+                            SizedBox(width: 4),
+                            Text('Planlı etkinlik yok', style: TextStyle(color: Colors.white30, fontSize: 11)),
+                          ],
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
     final visibleItems = _calculateVisibleItems();
+
+    final visibleItemsCount = kIsWeb
+        ? CampusLocation.locations.where((loc) {
+            final userLat = _currentPosition?.latitude ?? 38.6795;
+            final userLng = _currentPosition?.longitude ?? 39.1995;
+            final distance = geo.Geolocator.distanceBetween(userLat, userLng, loc.latitude, loc.longitude);
+            return distance <= _maxDistance;
+          }).length
+        : visibleItems.length;
+
+    final visibleEventsCount = kIsWeb
+        ? _activeEvents.where((e) {
+            if (!e.hasLocation) return false;
+            final userLat = _currentPosition?.latitude ?? 38.6795;
+            final userLng = _currentPosition?.longitude ?? 39.1995;
+            final distance = geo.Geolocator.distanceBetween(userLat, userLng, e.latitude!, e.longitude!);
+            return distance <= _maxDistance;
+          }).length
+        : visibleItems.fold<int>(0, (sum, item) => sum + item.events.length);
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -438,8 +636,18 @@ class _ArCameraScreenState extends State<ArCameraScreen>
           ...visibleItems
               .map((item) => _buildArOverlay(item, screenWidth)),
 
-          // Pusula Göstergesi
-          _buildCompassIndicator(),
+          // Pusula Göstergesi (sadece mobil için)
+          if (!kIsWeb) _buildCompassIndicator(),
+
+          // Web Kampüs Kartları Overlay (Sadece Web için)
+          if (kIsWeb)
+            Positioned(
+              bottom: 100 + MediaQuery.of(context).padding.bottom,
+              left: 0,
+              right: 0,
+              height: 160,
+              child: _buildWebOverlayList(screenWidth),
+            ),
 
           // Geri Butonu
           Positioned(
@@ -482,14 +690,14 @@ class _ArCameraScreenState extends State<ArCameraScreen>
                   const Icon(Icons.visibility, color: Colors.white54, size: 18),
                   const SizedBox(width: 8),
                   Text(
-                    '${visibleItems.length} bina görüş alanında',
+                    '$visibleItemsCount bina görüş alanında',
                     style: const TextStyle(color: Colors.white70, fontSize: 13),
                   ),
                   const SizedBox(width: 16),
                   const Icon(Icons.event, color: Colors.white54, size: 18),
                   const SizedBox(width: 4),
                   Text(
-                    '${visibleItems.fold<int>(0, (sum, item) => sum + item.events.length)} etkinlik',
+                    '$visibleEventsCount etkinlik',
                     style: const TextStyle(color: Colors.white70, fontSize: 13),
                   ),
                 ],

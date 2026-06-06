@@ -5,6 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter_map/flutter_map.dart' as fm;
+import 'package:latlong2/latlong.dart' as ll;
 import '../models/campus_location.dart';
 import '../models/event_model.dart';
 import '../services/mapbox_route_service.dart';
@@ -34,6 +37,10 @@ class _MapScreenState extends State<MapScreen> {
   num? _routeDuration;
   geo.Position? _currentPosition;
   StreamSubscription<geo.Position>? _positionStreamSubscription;
+
+  // Web Map state
+  final fm.MapController _webMapController = fm.MapController();
+  List<ll.LatLng> _webRoutePoints = [];
 
   // Yeni state'ler
   List<EventModel> _events = [];
@@ -75,10 +82,30 @@ class _MapScreenState extends State<MapScreen> {
   void initState() {
     super.initState();
     final accessToken = dotenv.get('MAPBOX_ACCESS_TOKEN');
-    MapboxOptions.setAccessToken(accessToken);
+    if (!kIsWeb) {
+      MapboxOptions.setAccessToken(accessToken);
+    }
     _checkUserRole();
     _startEventsStream();
     _initConnectivity();
+    if (kIsWeb) {
+      _initWebLocation();
+    }
+  }
+
+  void _initWebLocation() async {
+    final hasPermission = await LocationService.checkAndRequestPermissions(context);
+    if (hasPermission) {
+      final position = await LocationService.getCurrentLocation();
+      if (position != null && mounted) {
+        setState(() => _currentPosition = position);
+      }
+      _positionStreamSubscription = LocationService.getPositionStream().listen((geo.Position position) {
+        if (!mounted) return;
+        setState(() => _currentPosition = position);
+        if (_selectedDestination != null) _drawRoute(_selectedDestination!);
+      });
+    }
   }
 
   Future<void> _initConnectivity() async {
@@ -187,6 +214,12 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   void _focusOnUserLocation() {
+    if (kIsWeb) {
+      if (_currentPosition != null) {
+        _webMapController.move(ll.LatLng(_currentPosition!.latitude, _currentPosition!.longitude), _zoom);
+      }
+      return;
+    }
     if (_mapboxMap == null || _currentPosition == null) return;
     _mapboxMap!.flyTo(
       CameraOptions(
@@ -392,6 +425,41 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   Future<void> _drawRoute(CampusLocation destination) async {
+    if (kIsWeb) {
+      setState(() {
+        _selectedDestination = destination;
+        _lastSelectedDestination = destination;
+        _routeDistance = null;
+        _routeDuration = null;
+      });
+      final start = _currentPosition != null
+          ? Position(_currentPosition!.longitude, _currentPosition!.latitude)
+          : Position(_longitude, _latitude);
+      final end = Position(destination.longitude, destination.latitude);
+      final routeData = await MapboxRouteService.getWalkingRoute(start, end);
+      if (routeData == null) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Rota hesaplanamadı')));
+        return;
+      }
+      final geoJsonGeometry = routeData['geometry'];
+      final distance = routeData['distance'] as num;
+      final duration = routeData['duration'] as num;
+      
+      final coords = geoJsonGeometry['coordinates'] as List;
+      final points = coords.map((c) => ll.LatLng(c[1] as double, c[0] as double)).toList();
+      
+      setState(() {
+        _routeDistance = distance;
+        _routeDuration = duration;
+        _lastRouteDistance = distance;
+        _lastRouteDuration = duration;
+        _webRoutePoints = points;
+      });
+      
+      _webMapController.move(ll.LatLng(destination.latitude, destination.longitude), 16.5);
+      return;
+    }
+
     if (_mapboxMap == null) return;
     setState(() {
       _selectedDestination = destination;
@@ -483,22 +551,30 @@ class _MapScreenState extends State<MapScreen> {
 
     if (matchingLocations.isNotEmpty) {
       final target = matchingLocations.first;
-      _mapboxMap?.flyTo(
-        CameraOptions(
-          center: Point(coordinates: Position(target.longitude, target.latitude)),
-          zoom: 17.5,
-        ),
-        MapAnimationOptions(duration: 1200),
-      );
+      if (kIsWeb) {
+        _webMapController.move(ll.LatLng(target.latitude, target.longitude), 17.5);
+      } else {
+        _mapboxMap?.flyTo(
+          CameraOptions(
+            center: Point(coordinates: Position(target.longitude, target.latitude)),
+            zoom: 17.5,
+          ),
+          MapAnimationOptions(duration: 1200),
+        );
+      }
     } else if (matchingEvents.isNotEmpty && matchingEvents.first.hasLocation) {
       final e = matchingEvents.first;
-      _mapboxMap?.flyTo(
-        CameraOptions(
-          center: Point(coordinates: Position(e.longitude!, e.latitude!)),
-          zoom: 17.5,
-        ),
-        MapAnimationOptions(duration: 1200),
-      );
+      if (kIsWeb) {
+        _webMapController.move(ll.LatLng(e.latitude!, e.longitude!), 17.5);
+      } else {
+        _mapboxMap?.flyTo(
+          CameraOptions(
+            center: Point(coordinates: Position(e.longitude!, e.latitude!)),
+            zoom: 17.5,
+          ),
+          MapAnimationOptions(duration: 1200),
+        );
+      }
       setState(() {
         _selectedEvent = e;
         _lastSelectedEvent = e;
@@ -908,11 +984,126 @@ class _MapScreenState extends State<MapScreen> {
       body: Stack(
         children: [
           // Harita
-          MapWidget(
-            onMapCreated: _onMapCreated,
-            cameraOptions: CameraOptions(center: Point(coordinates: Position(_longitude, _latitude)), zoom: _zoom),
-            styleUri: MapboxStyles.MAPBOX_STREETS,
-          ),
+          kIsWeb
+              ? fm.FlutterMap(
+                  mapController: _webMapController,
+                  options: fm.MapOptions(
+                    initialCenter: ll.LatLng(_latitude, _longitude),
+                    initialZoom: _zoom,
+                  ),
+                  children: [
+                    fm.TileLayer(
+                      urlTemplate: 'https://api.mapbox.com/styles/v1/mapbox/dark-v11/tiles/{z}/{x}/{y}?access_token={accessToken}',
+                      additionalOptions: {
+                        'accessToken': dotenv.get('MAPBOX_ACCESS_TOKEN', fallback: ''),
+                      },
+                    ),
+                    if (_webRoutePoints.isNotEmpty)
+                      fm.PolylineLayer(
+                        polylines: [
+                          fm.Polyline(
+                            points: _webRoutePoints,
+                            color: const Color(0xFF800000),
+                            strokeWidth: 6.0,
+                          ),
+                        ],
+                      ),
+                    fm.MarkerLayer(
+                      markers: [
+                        // User location marker
+                        if (_currentPosition != null)
+                          fm.Marker(
+                            point: ll.LatLng(_currentPosition!.latitude, _currentPosition!.longitude),
+                            width: 40,
+                            height: 40,
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: Colors.blueAccent.withAlpha(200),
+                                shape: BoxShape.circle,
+                                border: Border.all(color: Colors.white, width: 2),
+                              ),
+                              child: const Icon(Icons.my_location, color: Colors.white, size: 18),
+                            ),
+                          ),
+                        // Campus locations
+                        ...CampusLocation.locations.map((loc) {
+                          return fm.Marker(
+                            point: ll.LatLng(loc.latitude, loc.longitude),
+                            width: 140,
+                            height: 70,
+                            child: GestureDetector(
+                              onTap: () => _drawRoute(loc),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: Colors.black.withAlpha(200),
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(color: loc.color),
+                                    ),
+                                    child: Text(
+                                      loc.name,
+                                      style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  Icon(loc.icon, color: loc.color, size: 24),
+                                ],
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                        // Events markers
+                        ..._events.where((e) {
+                          if (!e.hasLocation) return false;
+                          if (_activeFilter != 'Tümü' && e.category.displayName != _activeFilter) return false;
+                          return true;
+                        }).map((event) {
+                          return fm.Marker(
+                            point: ll.LatLng(event.latitude!, event.longitude!),
+                            width: 140,
+                            height: 70,
+                            child: GestureDetector(
+                              onTap: () {
+                                setState(() {
+                                  _selectedEvent = event;
+                                  _lastSelectedEvent = event;
+                                  _selectedDestination = null;
+                                });
+                              },
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFFFD700).withAlpha(220),
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(color: event.category.color),
+                                    ),
+                                    child: Text(
+                                      event.title,
+                                      style: const TextStyle(color: Colors.black, fontSize: 10, fontWeight: FontWeight.bold),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  Icon(event.category.icon, color: event.category.color, size: 28),
+                                ],
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                      ],
+                    ),
+                  ],
+                )
+              : MapWidget(
+                  onMapCreated: _onMapCreated,
+                  cameraOptions: CameraOptions(center: Point(coordinates: Position(_longitude, _latitude)), zoom: _zoom),
+                  styleUri: MapboxStyles.MAPBOX_STREETS,
+                ),
           // Semantik Arama
           _buildSearchBar(),
           // Filtre Chipleri
