@@ -1,0 +1,117 @@
+.camera-view-container {
+  position: absolute;
+  inset: 0;
+  z-index: 50; /* Haritanın üzerinde olsun */
+  background: #000;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.camera-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 51;
+}
+
+.camera-close-btn {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 53;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 50%;
+  color: #fff;
+  font-size: 16px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.camera-close-btn:hover {
+  background: rgba(0, 0, 0, 0.7);
+  transform: scale(1.1);
+}
+
+.camera-overlay-bottom {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 52;
+  padding: 24px 16px 32px 16px;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.9) 0%, rgba(0, 0, 0, 0) 100%);
+}
+
+.locations-slider {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  scroll-behavior: smooth;
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none;  /* IE/Edge */
+  padding-bottom: 8px; /* Kaydırma alanı için boşluk */
+}
+
+.locations-slider::-webkit-scrollbar {
+  display: none; /* Chrome, Safari, Opera */
+}
+
+.location-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 220px;
+  background: rgba(30, 30, 44, 0.7);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  padding: 12px 16px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+  flex-shrink: 0;
+}
+
+.loc-icon {
+  font-size: 24px;
+  background: rgba(255, 255, 255, 0.1);
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+}
+
+.loc-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.loc-name {
+  color: #fff;
+  font-weight: 700;
+  font-size: 14px;
+  font-family: 'Inter', sans-serif;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 140px;
+}
+
+.loc-distance {
+  color: #a78bfa;
+  font-size: 12px;
+  font-weight: 500;
+  margin-top: 2px;
+}
