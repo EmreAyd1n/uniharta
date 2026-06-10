@@ -132,21 +132,16 @@ JSON formatında yanıt ver.'''
     final url = '$_baseUrl?key=$apiKey';
 
     // Veriyi basit bir string listesine dönüştür
-    String eventsText = activeEvents.asMap().entries.map((entry) {
-      final index = entry.key + 1;
-      final e = entry.value;
-      return "Etkinlik $index: ${e.title}, Kategori: ${e.category.displayName}";
-    }).join("\n");
+    String eventsText = activeEvents.map((e) => e.title).join(", ");
+
+    final promptText = 'Sen Fırat Üniversitesi kampüs rehberisin. Kampüsteki güncel etkinlikler şunlar: $eventsText. Bu etkinliklere bakarak öğrencilere samimi, enerjik ve kesinlikle en fazla 3-4 cümlelik bir tavsiye yazısı üret.';
 
     final requestBody = {
       'contents': [
         {
           'parts': [
             {
-              'text': '''Sen Fırat Üniversitesi kampüs rehberisin. Sana verdiğim etkinliklere bakarak öğrencilere samimi, enerjik ve kesinlikle en fazla 3-4 cümlelik bir tavsiye yazısı üret.
-
-Aktif Etkinlikler:
-$eventsText'''
+              'text': promptText
             }
           ]
         }
@@ -169,7 +164,7 @@ $eventsText'''
         return 'Şu an öneri servisine ulaşılamıyor ama kampüste her zaman keşfedilecek bir şeyler vardır!';
       }
     } catch (e) {
-      debugPrint('Gemini API Exception: $e');
+      print('Gemini Hatasi: $e');
       return 'Bağlantı sorunu yaşandı ancak haritadan etkinliklere göz atabilirsin!';
     }
   }

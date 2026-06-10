@@ -103,11 +103,9 @@ export async function generateCampusRecommendation(activeEvents) {
   const url = `${BASE_URL}?key=${apiKey}`;
 
   // Veriyi basit bir string listesine dönüştür
-  const eventsText = activeEvents.map((e, index) => 
-    `Etkinlik ${index + 1}: ${e.title || 'İsimsiz Etkinlik'}, Kategori: ${e.category || 'Belirtilmedi'}`
-  ).join('\n');
+  const eventsText = activeEvents.map(e => e.title || 'İsimsiz Etkinlik').join(', ');
 
-  const promptText = `Sen Fırat Üniversitesi kampüs rehberisin. Sana verdiğim etkinliklere bakarak öğrencilere samimi, enerjik ve kesinlikle en fazla 3-4 cümlelik bir tavsiye yazısı üret.\n\nAktif Etkinlikler:\n${eventsText}`;
+  const promptText = `Sen Fırat Üniversitesi kampüs rehberisin. Kampüsteki güncel etkinlikler şunlar: ${eventsText}. Bu etkinliklere bakarak öğrencilere samimi, enerjik ve kesinlikle en fazla 3-4 cümlelik bir tavsiye yazısı üret.`;
 
   const requestBody = {
     contents: [
@@ -133,7 +131,7 @@ export async function generateCampusRecommendation(activeEvents) {
       return 'Şu an öneri servisine ulaşılamıyor ama kampüste her zaman keşfedilecek bir şeyler vardır!';
     }
   } catch (e) {
-    console.error('Gemini API Exception:', e);
+    console.error('Gemini Hatasi:', e);
     return 'Bağlantı sorunu yaşandı ancak haritadan etkinliklere göz atabilirsin!';
   }
 }
