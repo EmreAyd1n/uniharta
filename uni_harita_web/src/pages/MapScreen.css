@@ -725,3 +725,82 @@
     padding: 24px;
   }
 }
+
+/* ── AI Recommendation Modal ── */
+.ai-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  animation: fadeIn 0.3s ease;
+}
+
+.ai-modal-content {
+  background: rgba(30, 30, 44, 0.85);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(124, 108, 240, 0.3);
+  border-radius: 24px;
+  padding: 32px;
+  width: 90%;
+  max-width: 440px;
+  box-shadow: 0 20px 40px rgba(124, 108, 240, 0.2);
+  color: #fff;
+  animation: modalSlideUp 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.ai-modal-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.ai-modal-header .ai-icon {
+  font-size: 28px;
+  color: #FFD700;
+}
+
+.ai-modal-header h2 {
+  font-size: 20px;
+  font-weight: 700;
+  margin: 0;
+  background: linear-gradient(135deg, #FFD700, #ffaa00);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.ai-modal-close {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 24px;
+  cursor: pointer;
+  padding: 4px;
+  transition: color 0.2s;
+}
+
+.ai-modal-close:hover {
+  color: #fff;
+}
+
+.ai-modal-body {
+  font-size: 16px;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.fab-btn.ai-recommend {
+  color: #fff;
+  background: linear-gradient(135deg, #7c6cf0, #a78bfa);
+  border: none;
+}
+.fab-btn.ai-recommend:hover {
+  box-shadow: 0 4px 20px rgba(124, 108, 240, 0.6);
+}

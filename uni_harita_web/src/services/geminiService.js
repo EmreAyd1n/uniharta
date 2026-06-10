@@ -85,3 +85,53 @@ JSON formatında yanıt ver.`,
     return null;
   }
 }
+
+/**
+ * Aktif etkinliklere göre kampüs önerisi oluşturur
+ */
+export async function generateCampusRecommendation(activeEvents) {
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY || '';
+  if (!apiKey) {
+    console.warn('VITE_GEMINI_API_KEY bulunamadı');
+    return null;
+  }
+
+  const url = `${BASE_URL}?key=${apiKey}`;
+
+  const eventsText = (!activeEvents || activeEvents.length === 0)
+    ? "Şu an kampüste hiç aktif etkinlik yok."
+    : `Aktif Etkinlikler:\n${activeEvents.map(e => `- ${e.title}`).join('\n')}`;
+
+  const requestBody = {
+    contents: [
+      {
+        parts: [
+          {
+            text: `Sen Fırat Üniversitesi'nin samimi AI kampüs rehberisin. Aktif etkinliklere bakarak kullanıcıya ne yapabileceğine dair samimi, enerjik ve en fazla 3-4 cümlelik kısa bir kampüs özeti/tavsiyesi üret. Eğer o an hiç etkinlik yoksa, cana yakın bir dille kampüsün sakin olduğunu söyle.\n\n${eventsText}`
+          }
+        ]
+      }
+    ]
+  };
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody),
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      const text = data.candidates[0].content.parts[0].text;
+      return text;
+    } else {
+      console.error('Gemini API Error:', response.status);
+      return null;
+    }
+  } catch (e) {
+    console.error('Gemini API Exception:', e);
+    return null;
+  }
+}
+

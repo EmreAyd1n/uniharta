@@ -10,7 +10,7 @@ import {
   leaveEvent,
   subscribeToParticipants,
 } from '../services/eventService';
-import { analyzeIntent } from '../services/geminiService';
+import { analyzeIntent, generateCampusRecommendation } from '../services/geminiService';
 import { getWalkingRoute } from '../services/mapboxRouteService';
 import CameraView from './CameraView';
 import './MapScreen.css';
@@ -76,6 +76,11 @@ export default function Home() {
     start_time: '',
   });
   const [creatingEvent, setCreatingEvent] = useState(false);
+
+  // AI Recommendation Modal
+  const [showAIModal, setShowAIModal] = useState(false);
+  const [aiRecommendation, setAiRecommendation] = useState(null);
+  const [isAILoading, setIsAILoading] = useState(false);
 
   // ──────────────────────────────────────────
   // Auth check
@@ -479,6 +484,22 @@ export default function Home() {
   }
 
   // ──────────────────────────────────────────
+  // Handle AI Recommendation
+  // ──────────────────────────────────────────
+  async function handleAIRecommendation() {
+    setShowAIModal(true);
+    setIsAILoading(true);
+    setAiRecommendation(null);
+
+    const recommendation = await generateCampusRecommendation(events);
+    
+    if (recommendation) {
+      setAiRecommendation(recommendation);
+    }
+    setIsAILoading(false);
+  }
+
+  // ──────────────────────────────────────────
   // Derived state
   // ──────────────────────────────────────────
   const showEventCard = selectedEvent != null;
@@ -597,6 +618,13 @@ export default function Home() {
               ➕
             </button>
           )}
+          <button
+            className="fab-btn ai-recommend"
+            title="AI Kampüs Önerisi"
+            onClick={handleAIRecommendation}
+          >
+            ✨
+          </button>
           <button
             className="fab-btn gps"
             title="Konumuma Git"
@@ -847,6 +875,43 @@ export default function Home() {
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {/* ── AI Recommendation Modal ── */}
+      {showAIModal && (
+        <div 
+          className="ai-modal-overlay"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowAIModal(false);
+          }}
+        >
+          <div className="ai-modal-content">
+            <div className="ai-modal-header">
+              <span className="ai-icon">✨</span>
+              <h2>AI Kampüs Önerisi</h2>
+              <button 
+                className="ai-modal-close" 
+                onClick={() => setShowAIModal(false)}
+              >
+                ✕
+              </button>
+            </div>
+            <div className="ai-modal-body">
+              {isAILoading ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <div className="search-spinner" style={{ borderColor: 'rgba(255,215,0,0.3)', borderTopColor: '#FFD700', margin: 0 }} />
+                  <span>Kampüs Asistanı düşünüyor...</span>
+                </div>
+              ) : (
+                aiRecommendation ? (
+                  <div style={{ whiteSpace: 'pre-wrap' }}>{aiRecommendation}</div>
+                ) : (
+                  <span style={{ color: '#fca5a5' }}>Öneri alınamadı. Daha sonra tekrar deneyin.</span>
+                )
+              )}
+            </div>
+          </div>
         </div>
       )}
 

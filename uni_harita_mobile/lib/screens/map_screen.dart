@@ -965,6 +965,99 @@ class _MapScreenState extends State<MapScreen> {
     );
   }
 
+  bool _isLoadingAI = false;
+
+  Future<void> _showAIRecommendation() async {
+    if (_isOffline) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('İnternet bağlantısı gerekiyor'), backgroundColor: Colors.redAccent)
+      );
+      return;
+    }
+
+    setState(() {
+      _isLoadingAI = true;
+    });
+
+    // Loading modal
+    showModalBottomSheet(
+      context: context,
+      isDismissible: false,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(24),
+        decoration: const BoxDecoration(
+          color: Color(0xFF1E1E2C),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: const [
+            CircularProgressIndicator(color: Color(0xFF7c6cf0)),
+            SizedBox(height: 16),
+            Text('Kampüs Asistanı düşünüyor...', style: TextStyle(color: Colors.white, fontSize: 16)),
+          ],
+        ),
+      ),
+    );
+
+    final recommendation = await GeminiService.generateCampusRecommendation(_events);
+
+    if (!mounted) return;
+    
+    // Close loading modal
+    Navigator.of(context).pop();
+
+    setState(() {
+      _isLoadingAI = false;
+    });
+
+    if (recommendation != null) {
+      showModalBottomSheet(
+        context: context,
+        backgroundColor: Colors.transparent,
+        builder: (context) => Container(
+          padding: const EdgeInsets.all(24),
+          decoration: const BoxDecoration(
+            color: Color(0xFF1E1E2C),
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+            boxShadow: [
+              BoxShadow(color: Color(0xFF7c6cf0), blurRadius: 20, spreadRadius: -5),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.auto_awesome, color: Color(0xFFFFD700), size: 28),
+                  const SizedBox(width: 12),
+                  const Text('AI Kampüs Önerisi', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
+                  const Spacer(),
+                  IconButton(
+                    icon: const Icon(Icons.close, color: Colors.white54),
+                    onPressed: () => Navigator.of(context).pop(),
+                  )
+                ],
+              ),
+              const SizedBox(height: 16),
+              Text(
+                recommendation,
+                style: const TextStyle(color: Colors.white, fontSize: 16, height: 1.5),
+              ),
+              const SizedBox(height: 16),
+            ],
+          ),
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Öneri alınamadı. Daha sonra tekrar deneyin.'), backgroundColor: Colors.redAccent)
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final filteredEvents = _events.where((event) {
@@ -1157,6 +1250,16 @@ class _MapScreenState extends State<MapScreen> {
                 onPressed: _openCreateEvent, backgroundColor: const Color(0xCC1A1A2E),
                 child: const Icon(Icons.add, color: Color(0xFF10B981))),
             ),
+            
+          // AI Öneri Butonu
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 350),
+            curve: Curves.easeInOut,
+            bottom: (_isOrganizer ? 192 : 136) + cardHeightOffset, right: 16,
+            child: FloatingActionButton(heroTag: 'ai_btn', mini: true,
+              onPressed: _showAIRecommendation, backgroundColor: const Color(0xFF7c6cf0),
+              child: const Icon(Icons.auto_awesome, color: Colors.white)),
+          ),
           
           // Smart bottom cards animated overlays
           AnimatedPositioned(

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter/foundation.dart';
+import '../models/event_model.dart';
 
 /// Gemini API'den dönen semantik analiz sonucu
 class GeminiSearchResult {
@@ -106,6 +107,55 @@ JSON formatında yanıt ver.'''
             data['candidates'][0]['content']['parts'][0]['text'] as String;
         final parsed = jsonDecode(text) as Map<String, dynamic>;
         return GeminiSearchResult.fromJson(parsed);
+      } else {
+        debugPrint('Gemini API Error ${response.statusCode}: ${response.body}');
+        return null;
+      }
+    } catch (e) {
+      debugPrint('Gemini API Exception: $e');
+      return null;
+    }
+  }
+
+  /// Aktif etkinliklere göre kampüs önerisi oluşturur
+  static Future<String?> generateCampusRecommendation(List<EventModel> activeEvents) async {
+    final apiKey = dotenv.get('GEMINI_API_KEY', fallback: '');
+    if (apiKey.isEmpty) {
+      debugPrint('GEMINI_API_KEY bulunamadı');
+      return null;
+    }
+
+    final url = '$_baseUrl?key=$apiKey';
+
+    String eventsText = activeEvents.isEmpty 
+        ? "Şu an kampüste hiç aktif etkinlik yok." 
+        : "Aktif Etkinlikler:\n${activeEvents.map((e) => "- ${e.title} (${e.category.displayName})").join("\n")}";
+
+    final requestBody = {
+      'contents': [
+        {
+          'parts': [
+            {
+              'text': '''Sen Fırat Üniversitesi'nin samimi AI kampüs rehberisin. Aktif etkinliklere bakarak kullanıcıya ne yapabileceğine dair samimi, enerjik ve en fazla 3-4 cümlelik kısa bir kampüs özeti/tavsiyesi üret. Eğer o an hiç etkinlik yoksa, cana yakın bir dille kampüsün sakin olduğunu söyle.
+
+$eventsText'''
+            }
+          ]
+        }
+      ]
+    };
+
+    try {
+      final response = await http.post(
+        Uri.parse(url),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(requestBody),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final text = data['candidates'][0]['content']['parts'][0]['text'] as String;
+        return text;
       } else {
         debugPrint('Gemini API Error ${response.statusCode}: ${response.body}');
         return null;
