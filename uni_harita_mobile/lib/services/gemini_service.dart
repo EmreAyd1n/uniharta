@@ -119,25 +119,33 @@ JSON formatında yanıt ver.'''
 
   /// Aktif etkinliklere göre kampüs önerisi oluşturur
   static Future<String?> generateCampusRecommendation(List<EventModel> activeEvents) async {
+    if (activeEvents.isEmpty) {
+      return 'Kampüs şu an çok sakin ve huzurlu. Kütüphanede kahve içip ders çalışmak veya yeşil alanda tur atmak için harika bir gün!';
+    }
+
     final apiKey = dotenv.get('GEMINI_API_KEY', fallback: '');
     if (apiKey.isEmpty) {
       debugPrint('GEMINI_API_KEY bulunamadı');
-      return null;
+      return 'API anahtarı eksik ama kampüs seni bekliyor!';
     }
 
     final url = '$_baseUrl?key=$apiKey';
 
-    String eventsText = activeEvents.isEmpty 
-        ? "Şu an kampüste hiç aktif etkinlik yok." 
-        : "Aktif Etkinlikler:\n${activeEvents.map((e) => "- ${e.title} (${e.category.displayName})").join("\n")}";
+    // Veriyi basit bir string listesine dönüştür
+    String eventsText = activeEvents.asMap().entries.map((entry) {
+      final index = entry.key + 1;
+      final e = entry.value;
+      return "Etkinlik $index: ${e.title}, Kategori: ${e.category.displayName}";
+    }).join("\n");
 
     final requestBody = {
       'contents': [
         {
           'parts': [
             {
-              'text': '''Sen Fırat Üniversitesi'nin samimi AI kampüs rehberisin. Aktif etkinliklere bakarak kullanıcıya ne yapabileceğine dair samimi, enerjik ve en fazla 3-4 cümlelik kısa bir kampüs özeti/tavsiyesi üret. Eğer o an hiç etkinlik yoksa, cana yakın bir dille kampüsün sakin olduğunu söyle.
+              'text': '''Sen Fırat Üniversitesi kampüs rehberisin. Sana verdiğim etkinliklere bakarak öğrencilere samimi, enerjik ve kesinlikle en fazla 3-4 cümlelik bir tavsiye yazısı üret.
 
+Aktif Etkinlikler:
 $eventsText'''
             }
           ]
@@ -158,11 +166,11 @@ $eventsText'''
         return text;
       } else {
         debugPrint('Gemini API Error ${response.statusCode}: ${response.body}');
-        return null;
+        return 'Şu an öneri servisine ulaşılamıyor ama kampüste her zaman keşfedilecek bir şeyler vardır!';
       }
     } catch (e) {
       debugPrint('Gemini API Exception: $e');
-      return null;
+      return 'Bağlantı sorunu yaşandı ancak haritadan etkinliklere göz atabilirsin!';
     }
   }
 }

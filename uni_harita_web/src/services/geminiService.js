@@ -90,26 +90,29 @@ JSON formatında yanıt ver.`,
  * Aktif etkinliklere göre kampüs önerisi oluşturur
  */
 export async function generateCampusRecommendation(activeEvents) {
+  if (!activeEvents || activeEvents.length === 0) {
+    return 'Kampüs şu an çok sakin ve huzurlu. Kütüphanede kahve içip ders çalışmak veya yeşil alanda tur atmak için harika bir gün!';
+  }
+
   const apiKey = import.meta.env.VITE_GEMINI_API_KEY || '';
   if (!apiKey) {
     console.warn('VITE_GEMINI_API_KEY bulunamadı');
-    return null;
+    return 'API anahtarı eksik ama kampüs seni bekliyor!';
   }
 
   const url = `${BASE_URL}?key=${apiKey}`;
 
-  const eventsText = (!activeEvents || activeEvents.length === 0)
-    ? "Şu an kampüste hiç aktif etkinlik yok."
-    : `Aktif Etkinlikler:\n${activeEvents.map(e => `- ${e.title}`).join('\n')}`;
+  // Veriyi basit bir string listesine dönüştür
+  const eventsText = activeEvents.map((e, index) => 
+    `Etkinlik ${index + 1}: ${e.title || 'İsimsiz Etkinlik'}, Kategori: ${e.category || 'Belirtilmedi'}`
+  ).join('\n');
+
+  const promptText = `Sen Fırat Üniversitesi kampüs rehberisin. Sana verdiğim etkinliklere bakarak öğrencilere samimi, enerjik ve kesinlikle en fazla 3-4 cümlelik bir tavsiye yazısı üret.\n\nAktif Etkinlikler:\n${eventsText}`;
 
   const requestBody = {
     contents: [
       {
-        parts: [
-          {
-            text: `Sen Fırat Üniversitesi'nin samimi AI kampüs rehberisin. Aktif etkinliklere bakarak kullanıcıya ne yapabileceğine dair samimi, enerjik ve en fazla 3-4 cümlelik kısa bir kampüs özeti/tavsiyesi üret. Eğer o an hiç etkinlik yoksa, cana yakın bir dille kampüsün sakin olduğunu söyle.\n\n${eventsText}`
-          }
-        ]
+        parts: [{ text: promptText }]
       }
     ]
   };
@@ -127,11 +130,11 @@ export async function generateCampusRecommendation(activeEvents) {
       return text;
     } else {
       console.error('Gemini API Error:', response.status);
-      return null;
+      return 'Şu an öneri servisine ulaşılamıyor ama kampüste her zaman keşfedilecek bir şeyler vardır!';
     }
   } catch (e) {
     console.error('Gemini API Exception:', e);
-    return null;
+    return 'Bağlantı sorunu yaşandı ancak haritadan etkinliklere göz atabilirsin!';
   }
 }
 
